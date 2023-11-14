@@ -8,6 +8,7 @@ import openai
 import importlib
 import alfworld
 import alfworld.agents.environment
+import time
 from utils import Model, get_chat, get_completion
 from env_history import EnvironmentHistory
 
@@ -20,23 +21,51 @@ with open(os.path.join(FOLDER, PROMPT_FILE), 'r') as f:
     d = json.load(f)
 
 def llm(prompt: str, model: Model, stop: List[str] = ["\n"]):
-    try:
-        cur_try = 0
-        while cur_try < 6:
+
+    cur_try = 0
+    while cur_try < 30:
+        try:
             if model == "text-davinci-003":
                 text = get_completion(prompt=prompt, temperature=cur_try * 0.2, stop_strs=stop)
             else:
-                text = get_chat(prompt=prompt, model=model, temperature=cur_try * 0.2, stop_strs=stop)
+                # text = get_chat(prompt=prompt, model=model, temperature=cur_try * 0.2, stop_strs=stop)
+                messages = [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+                response = openai.ChatCompletion.create(
+                    model=model,
+                    messages=messages,
+                    max_tokens=256,
+                    stop=["\n"],
+                    temperature=0.0,
+                )
+                text = response.choices[0]["message"]["content"]
+
             # dumb way to do this
             if len(text.strip()) >= 5:
                 return text
+
+        except openai.error.RateLimitError:
+            print("Rate limit exceeded. Retrying in 1s ...")
+            time.sleep(1)
             cur_try += 1
-        return ""
-    except Exception as e:
-        print(prompt)
-        print(e)
-        import sys
-        sys.exit(1)
+        except openai.error.ServiceUnavailableError:
+            print("Service Error. Retrying in 1s ...")
+            time.sleep(1)
+            cur_try += 1
+        except openai.error.APIError:
+            print("API Error. Retrying in 1s ...")
+            time.sleep(1)
+            cur_try += 1
+        except openai.error.Timeout:
+            print("API Timeout. Retrying in 1s ...")
+            time.sleep(1)
+            cur_try += 1
+
+    return ""
 
 def process_ob(ob):
     if ob.startswith('You arrive at loc '):
@@ -53,8 +82,10 @@ def alfworld_run(env, base_prompt, memory: List[str], to_print=True, ob='', mode
         print(ob)
         sys.stdout.flush()
     cur_step = 0
-    while cur_step < 49:
+    while cur_step < 30:
         action = llm(str(env_history) + ">", stop=['\n'], model=model).strip()
+        while len(action) > 0 and action[0] == ">":
+            action = action[2:]
         env_history.add("action", action)
         observation, reward, done, info = env.step([action])
         observation, reward, done = process_ob(observation[0]), info['won'][0], done[0]
@@ -83,10 +114,12 @@ PREFIXES = {
 def run_trial(
         trial_log_path: str,
         world_log_path: str,
+        trial_env_configs_log_path: str,
         trial_idx: int,
         env_configs: List[Dict[str, Any]],
         use_memory: bool,
         model: Model,
+        start_task_id: int
     ) -> List[Dict[str, Any]]:
     importlib.reload(alfworld)
     importlib.reload(alfworld.agents.environment)
@@ -115,8 +148,13 @@ def run_trial(
             # log to world log
             with open(world_log_path, 'a') as wf:
                 wf.write(f'Environment #{z} Trial #{trial_idx}: SUCCESS\n')
-            with open(trial_log_path, 'a') as wf:
-                wf.write(f'\n#####\n\nEnvironment #{z}: Success\n\n#####\n')
+            if 'trial_0' not in trial_log_path:
+                with open(trial_log_path, 'a') as wf:
+                    wf.write(f'\n#####\n\nEnvironment #{z}: Success\n\n#####\n')
+                continue
+        elif z < start_task_id:
+            with open(world_log_path, 'a') as wf:
+                wf.write(f'Environment #{z} Trial #{trial_idx}: FAIL\n')
             continue
 
         for i, (k, v) in enumerate(PREFIXES.items()):
@@ -140,6 +178,11 @@ def run_trial(
                 # log env results to trial log
                 with open(trial_log_path, 'a') as wf:
                     wf.write(f'\n#####\n\nEnvironment #{z}:\n{str(final_env_history)}\n\nSTATUS: {"OK" if is_success else "FAIL"}\n\n#####\n')
+
+        env_config['name'] = name
+        # log env configs for trial
+        with open('./'+trial_env_configs_log_path, 'w') as wf:
+            json.dump(env_configs, wf, indent=4)
 
     # close environment object
     env.close()

@@ -16,6 +16,7 @@ def get_args():
     parser.add_argument("--is_resume", action='store_true', help="To resume run")
     parser.add_argument("--resume_dir", type=str, help="If resume, the logging directory", default="")
     parser.add_argument("--start_trial_num", type=int, help="If resume, the start trial num", default=0)
+    parser.add_argument("--start_task_id", type=int, help="If resume, the start task id", default=0)
     parser.add_argument("--model", type=str, help="The model to use. One of `gpt-4`, `gpt-3.5-turbo`, or `text-davinci-003")
 
     args = parser.parse_args()
@@ -32,11 +33,25 @@ def main(args) -> None:
         logging_dir = args.resume_dir
 
         # load environment configs
-        env_config_path: str = os.path.join(args.resume_dir, f'env_results_trial_{args.start_trial_num - 1}.json')
+        if args.start_trial_num !=0:
+            env_config_path: str = os.path.join(args.resume_dir, f'env_results_trial_{args.start_trial_num - 1}.json')
+        else:
+            env_config_path: str = os.path.join(args.resume_dir, f'env_results_trial_{args.start_trial_num}.json')
+
         if not os.path.exists(env_config_path):
             raise ValueError(f"Environment config file `{env_config_path}` does not exist")
         with open(env_config_path, 'r') as rf:
             env_configs: List[Dict[str, Any]] = json.load(rf)
+        
+        # num_finished = args.start_
+
+        # for i in range(num_finished, args.num_envs):
+        #     env_configs += [{
+        #         'name': f'env_{i}',
+        #         'memory': [],
+        #         'is_success': False,
+                # 'skip': False
+            # }]
     else:
         # Create the run directory
         if not os.path.exists(args.run_name):
@@ -84,6 +99,7 @@ def main(args) -> None:
 
     # run trials
     trial_idx = args.start_trial_num
+    start_task_id = args.start_task_id
     while trial_idx < args.num_trials:
         with open(world_log_path, 'a') as wf:
             wf.write(f'\n\n***** Start Trial #{trial_idx} *****\n\n')
@@ -91,13 +107,22 @@ def main(args) -> None:
         # set paths to log files
         trial_log_path: str = os.path.join(args.run_name, f'trial_{trial_idx}.log')
         trial_env_configs_log_path: str = os.path.join(args.run_name, f'env_results_trial_{trial_idx}.json')
-        if os.path.exists(trial_log_path):
+        if os.path.exists(trial_log_path) and args.start_trial_num != 0:
             open(trial_log_path, 'w').close()
-        if os.path.exists(trial_env_configs_log_path):
+        if os.path.exists(trial_env_configs_log_path) and args.start_trial_num != 0:
             open(trial_env_configs_log_path, 'w').close()
 
         # run trial
-        run_trial(trial_log_path, world_log_path, trial_idx, env_configs, args.use_memory, args.model)
+        run_trial(
+                trial_log_path, 
+                world_log_path, 
+                trial_env_configs_log_path, 
+                trial_idx, 
+                env_configs, 
+                args.use_memory, 
+                args.model,
+                start_task_id
+        )
 
         # update memory if needed
         if args.use_memory:
@@ -112,6 +137,7 @@ def main(args) -> None:
             wf.write(f'\n\n***** End Trial #{trial_idx} *****\n\n')
 
         trial_idx += 1
+        start_task_id = 0
 
 
 if __name__ == '__main__':
