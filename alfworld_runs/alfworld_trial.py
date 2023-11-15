@@ -23,7 +23,7 @@ with open(os.path.join(FOLDER, PROMPT_FILE), 'r') as f:
 def llm(prompt: str, model: Model, stop: List[str] = ["\n"]):
 
     cur_try = 0
-    while cur_try < 30:
+    while cur_try < 6:
         try:
             if model == "text-davinci-003":
                 text = get_completion(prompt=prompt, temperature=cur_try * 0.2, stop_strs=stop)
@@ -40,7 +40,7 @@ def llm(prompt: str, model: Model, stop: List[str] = ["\n"]):
                     messages=messages,
                     max_tokens=256,
                     stop=["\n"],
-                    temperature=0.0,
+                    temperature=cur_try * 0.2,
                 )
                 text = response.choices[0]["message"]["content"]
 
